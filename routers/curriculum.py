@@ -8,10 +8,11 @@ Adds upload-material and upload-instructions endpoints for RAG context.
 from __future__ import annotations
 
 import io
+import json
 from datetime import datetime, timezone
 
 import pypdf
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from models.curriculum import (
     ApproveRequest,
@@ -132,6 +133,94 @@ async def generate(req: GenerateRequest, request: Request) -> LabMaterial:
         learning_objectives=req.learning_objectives,
         difficulty=req.difficulty,
         estimated_duration_min=req.estimated_duration_min,
+        material_content=material_content,
+        agent_instructions=agent_instructions,
+        approval_status="pending",
+        version=1,
+        generated_at=now,
+        last_updated=now,
+    )
+    store.put(material)
+    return material
+
+
+@router.post("/generate-with-material", response_model=LabMaterial)
+async def generate_with_material(
+    request: Request,
+    lab_id: str = Form(...),
+    title: str = Form(...),
+    learning_objectives: str = Form(...),  # JSON-encoded list e.g. '["obj1","obj2"]'
+    difficulty: str = Form("intermediate"),
+    estimated_duration_min: int = Form(90),
+    instructor_id: str = Form(...),
+    course_id: str = Form("csc580"),
+    file: UploadFile | None = File(None),
+) -> LabMaterial:
+    """One-shot endpoint: upload PDF + form fields → generate LabMaterial in a single request.
+
+    If no PDF is uploaded, any previously stored material_content for this lab_id is preserved.
+    learning_objectives must be a JSON-encoded list string.
+    """
+    store = request.app.state.store
+
+    # Extract PDF text if a real file was uploaded
+    material_content: str | None = None
+    if file and file.filename:
+        content_type = file.content_type or ""
+        if content_type not in ("application/pdf", "application/octet-stream"):
+            raise HTTPException(
+                status_code=415,
+                detail={
+                    "error": {
+                        "code": "UNSUPPORTED_MEDIA_TYPE",
+                        "message": "Only PDF files are accepted.",
+                        "agent": "curriculum-designer",
+                    }
+                },
+            )
+        material_content = await _extract_pdf_text(file)
+
+    # Preserve existing context when no new PDF is provided
+    existing = store.get(lab_id)
+    if material_content is None and existing:
+        material_content = existing.material_content
+    agent_instructions = existing.agent_instructions if existing else None
+
+    # Parse learning objectives — accept JSON list or newline-separated plain text
+    try:
+        objectives: list[str] = json.loads(learning_objectives)
+    except (json.JSONDecodeError, ValueError):
+        objectives = [o.strip() for o in learning_objectives.splitlines() if o.strip()]
+
+    req = GenerateRequest(
+        lab_id=lab_id,
+        course_id=course_id,
+        title=title,
+        learning_objectives=objectives,
+        difficulty=difficulty,
+        estimated_duration_min=estimated_duration_min,
+        instructor_id=instructor_id,
+    )
+
+    now = datetime.now(timezone.utc)
+    final_state = await _run_graph(
+        request, req,
+        material_content=material_content,
+        agent_instructions=agent_instructions,
+        feedback=None,
+        existing_spec=None,
+    )
+
+    material = LabMaterial(
+        lab_id=lab_id,
+        course_id=course_id,
+        title=title,
+        spec_markdown=final_state["spec_markdown"],
+        quiz=final_state["quiz"],
+        rubric=final_state["rubric"],
+        learning_objectives=objectives,
+        difficulty=difficulty,
+        estimated_duration_min=estimated_duration_min,
         material_content=material_content,
         agent_instructions=agent_instructions,
         approval_status="pending",
