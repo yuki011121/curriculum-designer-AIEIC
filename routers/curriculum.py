@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import io
 import json
+import html
 from datetime import datetime, timezone
 
 import pypdf
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 
 from models.curriculum import (
     ApproveRequest,
@@ -20,10 +21,7 @@ from models.curriculum import (
     FeedbackEntry,
     GenerateRequest,
     LabMaterial,
-    QuizQuestion,
     RequestChangesRequest,
-    Rubric,
-    RubricCriterion,
     UploadAckResponse,
     UploadInstructionsRequest,
 )
@@ -68,6 +66,223 @@ async def _extract_pdf_text(file: UploadFile) -> str:
             },
         )
     return text
+
+
+# ── PDF export helpers ────────────────────────────────────────────────────────
+
+def _safe_filename_component(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in value)
+    return cleaned.strip("_") or "lab"
+
+
+def _markdown_to_pdf_bytes(title: str, markdown_text: str) -> bytes:
+    try:
+        import markdown as md
+        from xhtml2pdf import pisa
+    except ModuleNotFoundError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "code": "PDF_EXPORT_DEPENDENCY_MISSING",
+                    "message": (
+                        "PDF export requires 'markdown' and 'xhtml2pdf'. "
+                        "Install dependencies and retry."
+                    ),
+                    "agent": "curriculum-designer",
+                }
+            },
+        ) from exc
+
+    body_html = md.markdown(
+        markdown_text,
+        extensions=["fenced_code", "tables", "sane_lists", "nl2br"],
+    )
+    safe_title = html.escape(title)
+    html_doc = f"""<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>{safe_title}</title>
+    <style>
+      @page {{
+        size: A4;
+        margin: 20mm 16mm;
+      }}
+      body {{
+        font-family: Helvetica, Arial, sans-serif;
+        font-size: 11pt;
+        color: #1f2328;
+        line-height: 1.55;
+      }}
+      h1 {{
+        font-size: 24pt;
+        margin: 0 0 10pt 0;
+        border-bottom: 1px solid #d0d7de;
+        padding-bottom: 6pt;
+      }}
+      h2 {{
+        font-size: 16pt;
+        margin: 18pt 0 8pt 0;
+      }}
+      h3 {{
+        font-size: 13pt;
+        margin: 14pt 0 6pt 0;
+      }}
+      p {{
+        margin: 0 0 8pt 0;
+      }}
+      ul, ol {{
+        margin: 0 0 8pt 18pt;
+      }}
+      li {{
+        margin: 0 0 4pt 0;
+      }}
+      code {{
+        font-family: Courier, monospace;
+        background: #f6f8fa;
+      }}
+      pre {{
+        font-family: Courier, monospace;
+        font-size: 10pt;
+        background: #f6f8fa;
+        border: 1px solid #d0d7de;
+        padding: 8pt;
+      }}
+      table {{
+        width: 100%;
+        border-collapse: collapse;
+        margin: 6pt 0 12pt 0;
+      }}
+      th, td {{
+        border: 1px solid #d0d7de;
+        padding: 6pt;
+        text-align: left;
+        vertical-align: top;
+      }}
+      th {{
+        background: #f6f8fa;
+      }}
+      hr {{
+        border: 0;
+        border-top: 1px solid #d0d7de;
+        margin: 12pt 0;
+      }}
+    </style>
+  </head>
+  <body>{body_html}</body>
+</html>
+"""
+    output = io.BytesIO()
+    status = pisa.CreatePDF(html_doc, dest=output, encoding="utf-8")
+    if status.err:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "code": "PDF_EXPORT_FAILED",
+                    "message": "Unable to render PDF from markdown content.",
+                    "agent": "curriculum-designer",
+                }
+            },
+        )
+    return output.getvalue()
+
+
+def _pdf_download_response(lab_id: str, kind: str, title: str, markdown_text: str) -> Response:
+    safe_lab_id = _safe_filename_component(lab_id)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    filename = f"{safe_lab_id}_{kind}_{stamp}.pdf"
+    return Response(
+        content=_markdown_to_pdf_bytes(title=title, markdown_text=markdown_text),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _lab_export_markdown(material: LabMaterial) -> str:
+    objective_lines = [f"- {objective}" for objective in material.learning_objectives]
+    return "\n".join(
+        [
+            f"# {material.title}",
+            "",
+            "## Metadata",
+            f"- **Lab ID:** `{material.lab_id}`",
+            f"- **Course ID:** `{material.course_id}`",
+            f"- **Version:** `{material.version}`",
+            f"- **Difficulty:** `{material.difficulty}`",
+            f"- **Estimated Duration:** `{material.estimated_duration_min}` minutes",
+            "",
+            "## Learning Objectives",
+            *objective_lines,
+            "",
+            "## Lab Spec",
+            material.spec_markdown,
+        ]
+    )
+
+
+def _quiz_export_markdown(material: LabMaterial) -> str:
+    lines = [
+        f"# Quiz - {material.title}",
+        "",
+        "## Metadata",
+        f"- **Lab ID:** `{material.lab_id}`",
+        f"- **Version:** `{material.version}`",
+        "",
+    ]
+    for question in material.quiz:
+        lines.extend(
+            [
+                f"## {question.id}",
+                f"- **Type:** `{question.type}`",
+                f"- **Difficulty:** `{question.difficulty}`",
+                f"- **Points:** `{question.rubric_points}`",
+                (
+                    f"- **Learning Objective:** `{question.learning_objective_ref}`"
+                    if question.learning_objective_ref
+                    else "- **Learning Objective:** _Not specified_"
+                ),
+                "",
+                "### Question",
+                question.question,
+                "",
+                "### Expected Answer",
+                question.expected_answer,
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _rubric_export_markdown(material: LabMaterial) -> str:
+    rubric = material.rubric
+    lines = [
+        f"# Rubric - {material.title}",
+        "",
+        "## Metadata",
+        f"- **Lab ID:** `{material.lab_id}`",
+        f"- **Version:** `{material.version}`",
+        "",
+        "## Component Weights",
+        "| Component | Weight |",
+        "| --- | ---: |",
+        f"| Code | {rubric.code_weight * 100:.0f}% |",
+        f"| Report | {rubric.report_weight * 100:.0f}% |",
+        f"| Manual | {rubric.manual_weight * 100:.0f}% |",
+        "",
+        "## Criteria",
+    ]
+    for idx, criterion in enumerate(rubric.criteria, start=1):
+        lines.extend(
+            [
+                f"### {idx}. {criterion.name}",
+                f"- **Weight:** {criterion.weight * 100:.0f}%",
+                criterion.description,
+                "",
+            ]
+        )
+    return "\n".join(lines)
 
 
 # ── Graph invocation helper ───────────────────────────────────────────────────
@@ -239,6 +454,51 @@ async def get_lab(lab_id: str, request: Request) -> LabMaterial:
     if material is None:
         raise _not_found(lab_id)
     return material
+
+
+@router.get("/{lab_id}/export/lab.pdf")
+async def export_lab_pdf(lab_id: str, request: Request) -> Response:
+    store = request.app.state.store
+    material = store.get(lab_id)
+    if material is None:
+        raise _not_found(lab_id)
+
+    return _pdf_download_response(
+        lab_id=lab_id,
+        kind="lab",
+        title=f"Lab Spec - {material.title}",
+        markdown_text=_lab_export_markdown(material),
+    )
+
+
+@router.get("/{lab_id}/export/quiz.pdf")
+async def export_quiz_pdf(lab_id: str, request: Request) -> Response:
+    store = request.app.state.store
+    material = store.get(lab_id)
+    if material is None:
+        raise _not_found(lab_id)
+
+    return _pdf_download_response(
+        lab_id=lab_id,
+        kind="quiz",
+        title=f"Quiz - {material.title}",
+        markdown_text=_quiz_export_markdown(material),
+    )
+
+
+@router.get("/{lab_id}/export/rubric.pdf")
+async def export_rubric_pdf(lab_id: str, request: Request) -> Response:
+    store = request.app.state.store
+    material = store.get(lab_id)
+    if material is None:
+        raise _not_found(lab_id)
+
+    return _pdf_download_response(
+        lab_id=lab_id,
+        kind="rubric",
+        title=f"Rubric - {material.title}",
+        markdown_text=_rubric_export_markdown(material),
+    )
 
 
 @router.post("/{lab_id}/upload-material", response_model=UploadAckResponse)

@@ -25,6 +25,9 @@ Set `LLM_BACKEND=mock` in `.env` to run without Azure credentials.
 | POST | `/curriculum/{lab_id}/approve` | Mark lab approved |
 | POST | `/curriculum/{lab_id}/request-changes` | Inject feedback → regenerate quiz + rubric |
 | POST | `/curriculum/{lab_id}/check-typos` | LLM proofread across spec, quiz, rubric |
+| GET  | `/curriculum/{lab_id}/export/lab.pdf` | Download lab spec and metadata as PDF |
+| GET  | `/curriculum/{lab_id}/export/quiz.pdf` | Download quiz as PDF |
+| GET  | `/curriculum/{lab_id}/export/rubric.pdf` | Download rubric as PDF |
 
 ## Architecture
 

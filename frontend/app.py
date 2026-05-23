@@ -89,6 +89,16 @@ def _display_lab(lab: dict) -> None:
                 )
 
 
+def _get_pdf_export(lab_id: str, kind: str) -> tuple[bytes | None, str | None]:
+    try:
+        response = requests.get(f"{API_URL}/curriculum/{lab_id}/export/{kind}.pdf", timeout=20)
+        if not response.ok:
+            return None, f"Export failed ({response.status_code})"
+        return response.content, None
+    except Exception as exc:
+        return None, str(exc)
+
+
 # ── Layout ────────────────────────────────────────────────────────────────────
 
 left, right = st.columns([1, 2], gap="large")
@@ -117,7 +127,7 @@ with left:
             type=["pdf"],
             help="Upload a PDF — its full text will be injected into every LLM prompt.",
         )
-        submitted = st.form_submit_button("Generate", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Generate Lab", type="primary", use_container_width=True)
 
     if submitted:
         objectives = [o.strip() for o in objectives_raw.strip().splitlines() if o.strip()]
@@ -247,6 +257,47 @@ with right:
     if "lab" in st.session_state:
         lab = st.session_state["lab"]
         st.subheader(f"{lab['title']}")
+        export_col1, export_col2, export_col3 = st.columns(3)
+
+        with export_col1:
+            lab_pdf, lab_pdf_err = _get_pdf_export(lab["lab_id"], "lab")
+            if lab_pdf:
+                st.download_button(
+                    "Download Lab PDF",
+                    data=lab_pdf,
+                    file_name=f"{lab['lab_id']}_lab.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+            elif lab_pdf_err:
+                st.caption(lab_pdf_err)
+
+        with export_col2:
+            quiz_pdf, quiz_pdf_err = _get_pdf_export(lab["lab_id"], "quiz")
+            if quiz_pdf:
+                st.download_button(
+                    "Download Quiz PDF",
+                    data=quiz_pdf,
+                    file_name=f"{lab['lab_id']}_quiz.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+            elif quiz_pdf_err:
+                st.caption(quiz_pdf_err)
+
+        with export_col3:
+            rubric_pdf, rubric_pdf_err = _get_pdf_export(lab["lab_id"], "rubric")
+            if rubric_pdf:
+                st.download_button(
+                    "Download Rubric PDF",
+                    data=rubric_pdf,
+                    file_name=f"{lab['lab_id']}_rubric.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+            elif rubric_pdf_err:
+                st.caption(rubric_pdf_err)
+
         _display_lab(lab)
 
         if lab.get("feedback_history"):
