@@ -20,7 +20,7 @@ Set `LLM_BACKEND=mock` in `.env` to run without Azure credentials.
 | GET  | `/health` | Health check |
 | POST | `/curriculum/generate` | Generate lab from objectives; preserves any uploaded RAG context |
 | GET  | `/curriculum/{lab_id}` | Fetch current `LabMaterial` |
-| POST | `/curriculum/{lab_id}/upload-material` | Upload PDF → extract text as generation context |
+| POST | `/curriculum/{lab_id}/upload-material` | Upload one or more PDFs → extract text as generation context |
 | POST | `/curriculum/{lab_id}/upload-instructions` | Store instructor instructions as generation context |
 | POST | `/curriculum/{lab_id}/approve` | Mark lab approved |
 | POST | `/curriculum/{lab_id}/request-changes` | Inject feedback → regenerate quiz + rubric |

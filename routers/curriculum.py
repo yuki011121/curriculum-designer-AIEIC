@@ -46,11 +46,23 @@ def _not_found(lab_id: str) -> HTTPException:
     )
 
 
-# ── PDF extraction helper ─────────────────────────────────────────────────────
 
 async def _extract_pdf_text(file: UploadFile) -> str:
+    filename = file.filename or "uploaded.pdf"
     data = await file.read()
-    reader = pypdf.PdfReader(io.BytesIO(data))
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(data))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "code": "PDF_PARSE_ERROR",
+                    "message": f"Could not parse PDF: {filename}",
+                    "agent": "curriculum-designer",
+                }
+            },
+        ) from exc
     pages = [page.extract_text() or "" for page in reader.pages]
     text = "\n\n".join(pages).strip()
     if not text:
@@ -60,7 +72,7 @@ async def _extract_pdf_text(file: UploadFile) -> str:
                 "error": {
                     "code": "PDF_NO_TEXT",
                     "message": (
-                        "PDF appears to be image-only or empty. "
+                        f"PDF '{filename}' appears to be image-only or empty. "
                         "No text could be extracted."
                     ),
                     "agent": "curriculum-designer",
@@ -68,6 +80,27 @@ async def _extract_pdf_text(file: UploadFile) -> str:
             },
         )
     return text
+
+
+def _collect_uploaded_files(
+    file: UploadFile | None = None,
+    files: list[UploadFile] | None = None,
+) -> list[UploadFile]:
+    collected: list[UploadFile] = []
+    if file and file.filename:
+        collected.append(file)
+    if files:
+        collected.extend(f for f in files if f and f.filename)
+    return collected
+
+
+async def _extract_and_merge_pdf_text(files: list[UploadFile]) -> str:
+    sections: list[str] = []
+    for i, uploaded in enumerate(files, start=1):
+        text = await _extract_pdf_text(uploaded)
+        filename = uploaded.filename or f"document_{i}.pdf"
+        sections.append(f"[Document {i}: {filename}]\n{text}")
+    return "\n\n" + ("-" * 64 + "\n\n").join(sections)
 
 
 # ── Graph invocation helper ───────────────────────────────────────────────────
@@ -155,30 +188,20 @@ async def generate_with_material(
     instructor_id: str = Form(...),
     course_id: str = Form("csc580"),
     file: UploadFile | None = File(None),
+    files: list[UploadFile] | None = File(None),
 ) -> LabMaterial:
-    """One-shot endpoint: upload PDF + form fields → generate LabMaterial in a single request.
+    """One-shot endpoint: upload one or more PDFs + form fields → generate LabMaterial.
 
     If no PDF is uploaded, any previously stored material_content for this lab_id is preserved.
     learning_objectives must be a JSON-encoded list string.
     """
     store = request.app.state.store
 
-    # Extract PDF text if a real file was uploaded
+    # Extract PDF text if one or more files were uploaded
     material_content: str | None = None
-    if file and file.filename:
-        content_type = file.content_type or ""
-        if content_type not in ("application/pdf", "application/octet-stream"):
-            raise HTTPException(
-                status_code=415,
-                detail={
-                    "error": {
-                        "code": "UNSUPPORTED_MEDIA_TYPE",
-                        "message": "Only PDF files are accepted.",
-                        "agent": "curriculum-designer",
-                    }
-                },
-            )
-        material_content = await _extract_pdf_text(file)
+    uploaded_files = _collect_uploaded_files(file=file, files=files)
+    if uploaded_files:
+        material_content = await _extract_and_merge_pdf_text(uploaded_files)
 
     # Preserve existing context when no new PDF is provided
     existing = store.get(lab_id)
@@ -245,9 +268,10 @@ async def get_lab(lab_id: str, request: Request) -> LabMaterial:
 async def upload_material(
     lab_id: str,
     request: Request,
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    files: list[UploadFile] | None = File(None),
 ) -> UploadAckResponse:
-    """Upload a PDF to use as RAG context for generation.
+    """Upload PDFs to use as RAG context for generation.
 
     The lab must already exist (created via POST /curriculum/generate).
     Extracted text is stored on the LabMaterial and included verbatim
@@ -258,29 +282,29 @@ async def upload_material(
     if material is None:
         raise _not_found(lab_id)
 
-    content_type = file.content_type or ""
-    if content_type not in ("application/pdf", "application/octet-stream"):
+    uploaded_files = _collect_uploaded_files(file=file, files=files)
+    if not uploaded_files:
         raise HTTPException(
-            status_code=415,
+            status_code=422,
             detail={
                 "error": {
-                    "code": "UNSUPPORTED_MEDIA_TYPE",
-                    "message": "Only PDF files are accepted.",
+                    "code": "FILES_REQUIRED",
+                    "message": "At least one PDF file is required.",
                     "agent": "curriculum-designer",
                 }
             },
         )
 
-    text = await _extract_pdf_text(file)
-    material.material_content = text
+    merged_text = await _extract_and_merge_pdf_text(uploaded_files)
+    material.material_content = merged_text
     material.last_updated = datetime.now(timezone.utc)
     store.put(material)
 
     return UploadAckResponse(
         lab_id=lab_id,
         field="material_content",
-        chars_stored=len(text),
-        message="PDF text extracted and stored. Re-generate to apply.",
+        chars_stored=len(merged_text),
+        message=f"{len(uploaded_files)} PDF(s) extracted and stored. Re-generate to apply.",
     )
 
 

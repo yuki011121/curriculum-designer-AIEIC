@@ -54,7 +54,11 @@ def _display_lab(lab: dict) -> None:
     col_meta3.metric("Questions", len(lab.get("quiz", [])))
 
     if lab.get("material_content"):
-        st.info(f"PDF context loaded — {len(lab['material_content']):,} chars injected into prompts")
+        doc_count = lab["material_content"].count("[Document ")
+        st.info(
+            f"PDF context loaded ({doc_count} document(s)) — "
+            f"{len(lab['material_content']):,} chars injected into prompts"
+        )
 
     spec_tab, quiz_tab, rubric_tab = st.tabs(["Spec", "Quiz", "Rubric"])
 
@@ -112,10 +116,11 @@ with left:
             "Difficulty", ["beginner", "intermediate", "advanced"], index=1
         )
         duration = st.number_input("Duration (minutes)", value=90, step=15)
-        pdf = st.file_uploader(
-            "Reference Material PDF (optional)",
+        pdfs = st.file_uploader(
+            "Reference Material PDFs (optional)",
             type=["pdf"],
-            help="Upload a PDF — its full text will be injected into every LLM prompt.",
+            accept_multiple_files=True,
+            help="Upload one or more PDFs — extracted text is injected into every LLM prompt.",
         )
         submitted = st.form_submit_button("Generate", type="primary", use_container_width=True)
 
@@ -129,9 +134,10 @@ with left:
             "difficulty": difficulty,
             "estimated_duration_min": str(duration),
         }
-        files = {}
-        if pdf is not None:
-            files["file"] = (pdf.name, pdf.getvalue(), "application/pdf")
+        files = [
+            ("files", (pdf.name, pdf.getvalue(), "application/pdf"))
+            for pdf in (pdfs or [])
+        ]
 
         with st.spinner("Generating… (30–60 s with Azure LLM, ~1 s in mock mode)"):
             try:
