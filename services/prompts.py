@@ -13,6 +13,12 @@ def _block(label: str, value: str | None, fallback: str = "None provided.") -> s
     """Render an optional context section."""
     return f"{label}:\n{value if value else fallback}"
 
+def _material_weight_instruction(weight: str) ->str:
+    if weight == "strict":
+        return "Use NOTHING BUT the uploaded material. Do not introduce new concepts that are not included."
+    if weight == "expansive":
+        return "Use the uploaded material to start off. Add on to it with content that is applicable."
+    return "Use the uploaded material as the main reference. You can expand where applicable."
 
 # ── Spec generation ───────────────────────────────────────────────────────────
 
@@ -23,6 +29,7 @@ def build_spec_prompt(
     duration_min: int,
     material_content: str | None,
     agent_instructions: str | None,
+    material_weight: str = "balanced",
 ) -> tuple[str, str]:
     """Returns (system_prompt, user_content)."""
     system = (
@@ -57,6 +64,7 @@ def build_quiz_prompt(
     agent_instructions: str | None,
     feedback: str | None = None,
     num_questions: int = 5,
+    material_weight: str = "balanced"
 ) -> tuple[str, str]:
     objectives_list = "\n".join(f"- {obj}" for obj in objectives)
     feedback_block = (
@@ -103,6 +111,7 @@ def build_rubric_prompt(
     spec_markdown: str,
     quiz_json: str,
     feedback: str | None = None,
+    material_weight: str = "balanced",
 ) -> tuple[str, str]:
     system = (
         "You are an expert CS grading rubric designer. "
@@ -114,6 +123,7 @@ def build_rubric_prompt(
     )
     user = f"""Generate a grading rubric for the lab below. Include at least 3 criteria.
 Criteria should reflect the lab tasks, skills tested, and quiz content.
+{_material_weight_instruction(material_weight)}
 {feedback_block}
 Lab specification:
 {spec_markdown}

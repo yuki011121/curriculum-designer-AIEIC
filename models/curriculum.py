@@ -72,6 +72,7 @@ class LabMaterial(BaseModel):
     learning_objectives: list[str]
     difficulty: str = "intermediate"
     estimated_duration_min: int = 90
+    material_weight: str = "balanced"
 
     # RAG context — stored after instructor upload, passed verbatim to LLM prompts
     material_content: str | None = None       # full extracted PDF text
@@ -99,6 +100,7 @@ class GenerateRequest(BaseModel):
     difficulty: str = "intermediate"
     estimated_duration_min: int = 90
     instructor_id: str
+    material_weight: Literal["strict", "balanced", "expansive"] = "balanced"
 
 
 class ApproveRequest(BaseModel):

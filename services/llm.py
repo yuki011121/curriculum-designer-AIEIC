@@ -78,9 +78,11 @@ class AzureLLMClient:
         duration_min: int,
         material_content: str | None,
         agent_instructions: str | None,
+        material_weight: str = "balanced",
     ) -> str:
         system, user = build_spec_prompt(
-            title, objectives, difficulty, duration_min, material_content, agent_instructions
+            title, objectives, difficulty, duration_min, material_content, agent_instructions,
+            material_weight=material_weight,
         )
         return await self._invoke(system, user)
 

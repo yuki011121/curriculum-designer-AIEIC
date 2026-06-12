@@ -112,6 +112,7 @@ async def _run_graph(
     agent_instructions: str | None,
     feedback: str | None,
     existing_spec: str | None,
+    material_weight: str = "balanced",
 ) -> dict:
     graph = request.app.state.generation_graph
     llm_client = request.app.state.llm_client
@@ -126,6 +127,7 @@ async def _run_graph(
         "self_review_notes": [],
         "retry_count": 0,
         "llm_client": llm_client,
+        "material_weight": material_weight,
     }
     return await graph.ainvoke(initial_state)
 
@@ -154,6 +156,7 @@ async def generate(req: GenerateRequest, request: Request) -> LabMaterial:
         agent_instructions=agent_instructions,
         feedback=None,
         existing_spec=None,
+        material_weight=req.material_weight,
     )
 
     material = LabMaterial(
@@ -168,6 +171,7 @@ async def generate(req: GenerateRequest, request: Request) -> LabMaterial:
         estimated_duration_min=req.estimated_duration_min,
         material_content=material_content,
         agent_instructions=agent_instructions,
+        material_weight=req.material_weight,
         approval_status="pending",
         version=1,
         generated_at=now,
@@ -380,6 +384,7 @@ async def request_changes(
         agent_instructions=material.agent_instructions,
         feedback=body.feedback,
         existing_spec=material.spec_markdown,   # spec preserved; quiz/rubric regenerated
+        material_weight=material.material_weight,
     )
 
     new_version = material.version + 1
