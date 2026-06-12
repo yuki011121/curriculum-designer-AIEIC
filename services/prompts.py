@@ -13,6 +13,14 @@ def _block(label: str, value: str | None, fallback: str = "None provided.") -> s
     """Render an optional context section."""
     return f"{label}:\n{value if value else fallback}"
 
+def _difficulty_guide() -> str:
+    return (
+        "Difficulty tier definitions:\n"
+        "- basic: Recognition or recall. e.g. 'What is X?', 'Which option describes Y?'\n"
+        "- intermediate: Understanding and application. e.g. Why does X happen when Y?', 'What does this code output and why?'\n"
+        "- challenge: Implementation, debugging, or design. e.g. 'Write a function that does X given the constraint Y', 'Find the bug in this code and fix it.'"
+    )
+
 def _material_weight_instruction(weight: str) ->str:
     if weight == "strict":
         return "Use NOTHING BUT the uploaded material. Do not introduce new concepts that are not included."
@@ -78,6 +86,7 @@ def build_quiz_prompt(
     )
     user = f"""Generate exactly {num_questions} quiz questions for the lab below.
 Include at least one question at each difficulty tier: basic, intermediate, challenge.
+{_difficulty_guide()}
 {feedback_block}
 Lab specification:
 {spec_markdown}
