@@ -108,6 +108,7 @@ class AzureLLMClient:
         self,
         spec_markdown: str,
         quiz: list[QuizQuestion],
+        feedback: str | None = None,
     ) -> Rubric:
         quiz_json = json.dumps([q.model_dump() for q in quiz], indent=2)
         system, user = build_rubric_prompt(spec_markdown, quiz_json)
@@ -190,7 +191,8 @@ class MockLLMClient:
         ]
 
     async def generate_rubric(self, spec_markdown: str,
-                              quiz: list[QuizQuestion]) -> Rubric:
+                              quiz: list[QuizQuestion],
+                              feedback: str | None = None) -> Rubric:
         return Rubric(
             code_weight=0.6, report_weight=0.3, manual_weight=0.1,
             criteria=[

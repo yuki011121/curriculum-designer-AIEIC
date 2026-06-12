@@ -102,14 +102,19 @@ Return ONLY the JSON array. No prose, no code fence."""
 def build_rubric_prompt(
     spec_markdown: str,
     quiz_json: str,
+    feedback: str | None = None,
 ) -> tuple[str, str]:
     system = (
         "You are an expert CS grading rubric designer. "
         "Create rubrics that are fair, specific, and aligned with the lab tasks and quiz."
     )
+    feedback_block = (
+        f"\nInstructor feedback on generated lab materials that need to be revised:\n{feedback}\n"
+        if feedback else ""
+    )
     user = f"""Generate a grading rubric for the lab below. Include at least 3 criteria.
 Criteria should reflect the lab tasks, skills tested, and quiz content.
-
+{feedback_block}
 Lab specification:
 {spec_markdown}
 

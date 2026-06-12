@@ -76,6 +76,7 @@ async def rubric_generator_node(state: GenerationState) -> dict:
     rubric = await state["llm_client"].generate_rubric(
         spec_markdown=state["spec_markdown"],
         quiz=state["quiz"],
+        feedback=state.get("feedback"),
     )
     return {"rubric": rubric}
 
@@ -95,7 +96,10 @@ async def self_review_node(state: GenerationState) -> dict:
 
 async def prepare_retry_node(state: GenerationState) -> dict:
     """Join self-review notes into feedback and increment the retry counter."""
-    feedback = "\n".join(state["self_review_notes"])
+    review_notes = "\n".join(state["self_review_notes"])
+    original_feedback = state.get("feedback") or ""
+    feedback = f"{original_feedback}\n{review_notes}".strip()
+
     logger.info("prepare_retry: injecting self-review notes as feedback for quiz regeneration")
     return {
         "feedback": feedback,
