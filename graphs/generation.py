@@ -29,6 +29,7 @@ class GenerationState(TypedDict):
     material_content: Optional[str]     # extracted PDF text (may be None)
     agent_instructions: Optional[str]   # instructor instructions (may be None)
     feedback: Optional[str]             # injected on request-changes path
+    material_weight: str
     spec_markdown: Optional[str]
     quiz: Optional[List[QuizQuestion]]
     rubric: Optional[Rubric]
